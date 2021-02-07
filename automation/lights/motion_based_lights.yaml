@@ -1,0 +1,224 @@
+blueprint:
+  name: Contolador do estado da iluminação
+  description: >
+    Ligar luz com base no movimento e luminusidade da divisão
+
+    Entidades necessárias:
+      - input_number (registo do modo manual/automático e contador de execuções)
+      - motion_sensor (sensor usado para ativar a automação)
+      - light (luz a controlar)
+
+    Entidades opcionais:
+      - Modo de funcionamento (apenas executar a automação caso o modo de funcionamento seja o definido)
+      - Sensor de luminusidade (device_class: illuminance)
+      - Nível de luminusidade
+      - Bloqueio se desligado (apenas executa a automação se entidade não estiver OFF)
+      - Bloqueio se ligado (apenas executa a automação se entidade não estiver ON)
+
+  domain: automation
+  input:
+    motion_sensor:
+      name: Sensor de Movimento
+      description: Sensor que aciona a automação
+      selector:
+        entity:
+    light_mode_counter:
+      name: Contador de execuções
+      description: >
+        Esta entidade guarda o número de execuções da automação e serve de
+        controlo para decidir se a luz está a ser controlada automáticamente ou manualmente
+      selector:
+        entity:
+          domain: input_number
+    target_entity:
+      name: Luz a controlar
+      description: Luz a controlar pela automação
+      selector:
+        entity:
+          domain: light
+    no_motion_wait:
+      name: Duração
+      description: Duração para manter a luz ligada após não existir movimento
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 600
+          unit_of_measurement: "s"
+    illuminance_sensor:
+      name: (OPCIONAL) Sensor de luminusidade
+      description: Sensor com o valor de luminusidade na divisão.
+      default:
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    illuminance_cutoff:
+      name: (OPCIONAL) Luminusidade
+      description: Executar a automação se a luminusidade for abaixo deste valor.
+      default:
+      selector:
+        number:
+          min: 0
+          max: 100
+    blocker_on_entity:
+      name: (OPCIONAL) Entidade bloqueadora ON
+      description: Automção é excluída se esta entidade estiver ON (ex, outras luzes já estarem ligadas).
+      default:
+      selector:
+        entity:
+    blocker_off_entity:
+      name: (OPCIONAL) Entidade bloqueadora OFF
+      description: Automção é excluída se esta entidade estiver OFF (ex, se não estiver ninguém em casa).
+      default:
+      selector:
+        entity:
+    number_of_repetitions:
+      name: (OPCIONAL) Número de repetições
+      description: Número máximo de repetições. Após este número a luz é mantida sempre acesa.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10
+          unit_of_measurement: "x"
+    required_house_mode:
+      name: (OPCIONAL) Ativar no modo de funcionamento
+      description: Nome do modo de funcionamento para esta automação
+      default:
+      selector:
+        text:
+    house_mode:
+      name: (OPCIONAL) Modo de funcionamento
+      description: Entidade que define o modo de funcionamento da casa
+      default: 'On'
+      selector:
+        entity:
+
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  target_entity: !input target_entity
+  illuminance_currently: !input illuminance_sensor
+  illuminance_cutoff: !input illuminance_cutoff
+  blocker_on_entity: !input blocker_on_entity
+  blocker_off_entity: !input blocker_off_entity
+  no_motion_wait: !input no_motion_wait
+  required_house_mode: !input required_house_mode
+  house_mode: !input house_mode
+  light_mode_counter: !input light_mode_counter
+  number_of_repetitions: !input number_of_repetitions
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+
+condition:
+  # Only run if in the specified house mode
+  - condition: template
+    value_template: >
+      {{
+        (house_mode == none)
+        or
+        (required_house_mode == none)
+        or
+        states[house_mode].state == required_house_mode
+      }}
+
+  # Now either run if the light is Off or if it is already running
+  - condition: or
+    conditions:
+      - condition: template
+        value_template: "{{ states[light_mode_counter].state | int > 0 }}"
+
+      - condition: and
+        conditions:
+          # This conditions matter if the light is not in automatic mode
+
+          # Do not run if this blocker is ON
+          - condition: template
+            value_template: "{{ (blocker_on_entity == none) or (not states[blocker_on_entity].state == 'on') }}"
+
+          # Do not run if the blocker is OFF
+          - condition: template
+            value_template: "{{ (blocker_off_entity == none) or (not states[blocker_off_entity].state == 'off') }}"
+
+          # Check illuminance level
+          - condition: template
+            value_template: >
+              {{
+                (illuminance_currently == none)
+                or
+                (illuminance_cutoff == none)
+                or
+                (states[illuminance_currently].state | int < illuminance_cutoff | int )
+              }}
+
+          # Do not run if light is on (manually turn on)
+          - condition: state
+            entity_id: !input target_entity
+            state: "off"
+
+action:
+  - choose:
+      - conditions: "{{ states[target_entity].state == 'off' }}"
+        sequence:
+          - service: input_number.increment
+            data:
+              entity_id: !input light_mode_counter
+
+  - service: light.turn_on
+    entity_id: !input target_entity
+
+  # Check if we reached the maximum number of executions
+  # If so reset the counter (this will keep light on
+  - choose:
+    - conditions: "{{ (number_of_repetitions|int > 0 ) and ( states[light_mode_counter].state|int < number_of_repetitions|int) }}"
+      sequence:
+        - service: input_number.set_value
+          data:
+            entity_id: !input light_mode_counter
+            value: 0
+
+  # Stop if counter was reset (means we reached the maximum number of executions)
+  - condition: template
+    value_template: "{{ (states[light_mode_counter].state|int) > 0 }}"
+
+  # Cancel if target is already off
+  # Otherwise wait for timeout
+  - wait_template: "{{ not states[target_entity].state == 'on' }}"
+    timeout:
+      seconds: "{{ ( (no_motion_wait|int) * (states[light_mode_counter].state|int) ) | int }}"
+
+  # Wait completed means that light was turned off manually
+  # If so reset counter
+  - choose:
+      - conditions: "{{ wait.completed }}"
+        sequence:
+          - service: input_number.set_value
+            data:
+              entity_id: !input light_mode_counter
+              value: 0
+
+  # Only continue if target light is still on
+  - condition: state
+    entity_id: !input target_entity
+    state: "on"
+
+  - service: light.turn_off
+    entity_id: !input target_entity
+
+  - delay:
+      seconds: 2
+
+  - wait_template: "{{ states[target_entity].state == 'on' }}"
+    timeout:
+      seconds: "{{ no_motion_wait }}"
+
+  - service: input_number.set_value
+    data:
+      entity_id: !input light_mode_counter
+      value: 0
