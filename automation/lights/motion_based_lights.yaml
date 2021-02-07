@@ -8,6 +8,14 @@ blueprint:
 
     Contudo, isto só acontece se a luz estiver inicialmente desligada, caso contrário esta automação não é executada.
 
+    Pode ser definido um número máximo de execuções a partir do qual a luz se mantem acesa (evitar que a malta se esteja sempre a abanar).
+    No caso deste valor ser mantido a zero ela é executada sempre.
+
+    O tempo que a luz se mantém ligada aumenta ao longo da execuções, ou seja, a primeira vez que a luz acende demora 1x a duração definida.
+    Após isto, se ela se apagar e for ativada por movimento o tempo é multiplicado por 2 e depois por 3, sucessivamente.
+
+    Após um período igual ao tempo este contador é reiniciado (ou caso a luz seja desligada manualmente).
+
     Atenção: esta automação não serve para desligar uma luz que tenha sido ligada manualmente após algum tempo.
 
     Entidades necessárias:
