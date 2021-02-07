@@ -1,7 +1,14 @@
 blueprint:
   name: Contolador do estado da iluminação
   description: >
-    Ligar luz com base no movimento e luminusidade da divisão
+    Ligar luz com base no movimento e luminusidade da divisão.
+
+    A ideia da automação é apenas ligar a luz quando ocorre movimento.
+    Caso isto aconteça a luz, após um tempo definido ela desliga-se automáticamente.
+
+    Contudo, isto só acontece se a luz estiver inicialmente desligada, caso contrário esta automação não é executada.
+
+    Atenção: esta automação não serve para desligar uma luz que tenha sido ligada manualmente após algum tempo.
 
     Entidades necessárias:
       - input_number (registo do modo manual/automático e contador de execuções)
