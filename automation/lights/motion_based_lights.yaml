@@ -76,6 +76,12 @@ blueprint:
         number:
           min: 0
           max: 100
+    only_after_sunset:
+      name: (OPCIONAL) Funcionamento Exclusivo de Noite
+      description: Apenas executar a automação durante a noite (após o pôr do sol)
+      default: 'off'
+      selector:
+        boolean:
     blocker_on_entity:
       name: (OPCIONAL) Entidade bloqueadora ON
       description: Automção é excluída se esta entidade estiver ON (ex, outras luzes já estarem ligadas).
@@ -90,7 +96,7 @@ blueprint:
         entity:
     number_of_repetitions:
       name: (OPCIONAL) Número de repetições
-      description: Número máximo de repetições. Após este número a luz é mantida sempre acesa.
+      description: Número máximo de repetições. Após este número a luz é mantida sempre acesa (Deve ser entre 0 e o número máximo do input_number definido).
       default: 0
       selector:
         number:
@@ -100,15 +106,22 @@ blueprint:
     required_house_mode:
       name: (OPCIONAL) Ativar no modo de funcionamento
       description: Nome do modo de funcionamento para esta automação
-      default:
+      default: 'On'
       selector:
         text:
     house_mode:
       name: (OPCIONAL) Modo de funcionamento
       description: Entidade que define o modo de funcionamento da casa
-      default: 'On'
+      default:
       selector:
         entity:
+    motion_light_main_sw:
+      name: (OPCIONAL) Controlador Geral das Luzes
+      description: Entidade que funciona como interruptor geral das automações das luzes
+      default:
+      selector:
+        entity:
+          domain: input_boolean
 
 
 mode: restart
@@ -125,6 +138,8 @@ variables:
   house_mode: !input house_mode
   light_mode_counter: !input light_mode_counter
   number_of_repetitions: !input number_of_repetitions
+  motion_light_main_sw: !input motion_light_main_sw
+  only_after_sunset: !input only_after_sunset
 
 trigger:
   - platform: state
@@ -141,6 +156,22 @@ condition:
         (required_house_mode == none)
         or
         states[house_mode].state == required_house_mode
+      }}
+
+  - condition: template
+    value_template: >
+      {{
+        (motion_light_main_sw == none)
+        or
+        (states[motion_light_main_sw].state == 'on')
+      }}
+
+  - condition: template
+    value_template: >
+      {{
+        (only_after_sunset == false)
+        or
+        (state_attr('sun.sun', 'elevation') < 10)
       }}
 
   # Now either run if the light is Off or if it is already running
@@ -188,15 +219,18 @@ action:
   - service: light.turn_on
     entity_id: !input target_entity
 
+  - delay:
+      seconds: 1
+
   # Check if we reached the maximum number of executions
   # If so reset the counter (this will keep light on
   - choose:
-    - conditions: "{{ (number_of_repetitions|int > 0 ) and ( states[light_mode_counter].state|int < number_of_repetitions|int) }}"
+    - conditions: "{{ (number_of_repetitions|int > 0 ) and ( states[light_mode_counter].state|int > number_of_repetitions|int) }}"
       sequence:
         - service: input_number.set_value
           data:
             entity_id: !input light_mode_counter
-            value: 0
+            value: 5
 
   # Stop if counter was reset (means we reached the maximum number of executions)
   - condition: template
@@ -227,7 +261,7 @@ action:
     entity_id: !input target_entity
 
   - delay:
-      seconds: 2
+      seconds: 1
 
   - wait_template: "{{ states[target_entity].state == 'on' }}"
     timeout:
