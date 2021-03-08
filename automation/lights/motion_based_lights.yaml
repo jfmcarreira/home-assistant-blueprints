@@ -106,7 +106,7 @@ blueprint:
     required_house_mode:
       name: (OPCIONAL) Ativar no modo de funcionamento
       description: Nome do modo de funcionamento para esta automação
-      default: 'On'
+      default:
       selector:
         text:
     house_mode:
@@ -128,6 +128,7 @@ mode: restart
 max_exceeded: silent
 
 variables:
+  motion_sensor: !input motion_sensor
   target_entity: !input target_entity
   illuminance_currently: !input illuminance_sensor
   illuminance_cutoff: !input illuminance_cutoff
@@ -235,6 +236,9 @@ action:
   # Stop if counter was reset (means we reached the maximum number of executions)
   - condition: template
     value_template: "{{ (states[light_mode_counter].state|int) > 0 }}"
+
+  # Wait untill the motion sensor is off
+  - wait_template: "{{ not states[motion_sensor].state == 'on' }}"
 
   # Cancel if target is already off
   # Otherwise wait for timeout
