@@ -18,6 +18,8 @@ blueprint:
 
     Atenção: esta automação não serve para desligar uma luz que tenha sido ligada manualmente após algum tempo.
 
+    Caso seja selecionado um modo de funcionamento, quando este altera a luz será desligada caso não deva ser ativada nesse modo.
+
     Entidades necessárias:
       - input_number (registo do modo manual/automático e contador de execuções)
       - motion_sensor (sensor usado para ativar a automação)
@@ -32,6 +34,11 @@ blueprint:
 
   domain: automation
   input:
+    room_name:
+      name: Nome da Divisão
+      description: >
+        Nome da divisão onde é aplicada esta regra de forma a cruzar os dados com device_tracker.
+        Se estiver alguém presente nesta divisão a luz não é apagada.
     motion_sensor:
       name: Sensor de Movimento
       description: Sensor que aciona a automação
@@ -79,7 +86,7 @@ blueprint:
     only_after_sunset:
       name: (OPCIONAL) Funcionamento Exclusivo de Noite
       description: Apenas executar a automação durante a noite (após o pôr do sol)
-      default: 'off'
+      default: "off"
       selector:
         boolean:
     blocker_on_entity:
@@ -123,11 +130,22 @@ blueprint:
         entity:
           domain: input_boolean
 
-
 mode: restart
 max_exceeded: silent
 
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+  - platform: state
+    entity_id: !input house_mode
+  - platform: state
+    entity_id: !input motion_light_main_sw
+    from: "on"
+    to: "off"
+
 variables:
+  room_name: !input room_name
   motion_sensor: !input motion_sensor
   target_entity: !input target_entity
   illuminance_currently: !input illuminance_sensor
@@ -142,48 +160,32 @@ variables:
   motion_light_main_sw: !input motion_light_main_sw
   only_after_sunset: !input only_after_sunset
 
-trigger:
-  - platform: state
-    entity_id: !input motion_sensor
-    to: "on"
-
 condition:
-  # Only run if in the specified house mode
-  - condition: template
-    value_template: >
-      {{
-        (house_mode == none)
-        or
-        (required_house_mode == none)
-        or
-        states[house_mode].state == required_house_mode
-      }}
-
-  - condition: template
-    value_template: >
-      {{
-        (motion_light_main_sw == none)
-        or
-        (states[motion_light_main_sw].state == 'on')
-      }}
-
-  - condition: template
-    value_template: >
-      {{
-        (only_after_sunset == false)
-        or
-        (state_attr('sun.sun', 'elevation') < 10)
-      }}
-
-  # Now either run if the light is Off or if it is already running
   - condition: or
     conditions:
+      # Run if the light is in automatic mode
       - condition: template
         value_template: "{{ states[light_mode_counter].state | int > 0 }}"
+
+      # If trigger is one of these continue to action
+      - condition: template
+        value_template: >
+          {{ 
+              ((not house_mode == none) and trigger.entity_id == house_mode) or
+              ((not motion_light_main_sw == none) and trigger.entity_id == motion_light_main_sw)
+          }}
 
       - condition: and
         conditions:
           # This conditions matter if the light is not in automatic mode
+          - condition: template
+            value_template: "{{ (motion_light_main_sw == none) or (states[motion_light_main_sw].state == 'on') }}"
+
+          - condition: template
+            value_template: "{{ (only_after_sunset == false) or  (state_attr('sun.sun', 'elevation') < 10) }}"
+
+          - condition: template
+            value_template: "{{ house_mode == none or required_house_mode == none or states[house_mode].state == required_house_mode }}"
 
           # Do not run if this blocker is ON
           - condition: template
@@ -210,68 +212,156 @@ condition:
             state: "off"
 
 action:
+  # Check if house mode, automation or sunset is met
+  #- alias: "Process specific triggers that can change light state"
   - choose:
-      - conditions: "{{ states[target_entity].state == 'off' }}"
+      - conditions: >
+          {{ 
+              ((not house_mode == none) and trigger.entity_id == house_mode) or
+              ((not motion_light_main_sw == none) and trigger.entity_id == motion_light_main_sw)
+          }}
         sequence:
-          - service: input_number.increment
-            data:
-              entity_id: !input light_mode_counter
+          - choose:
+              - conditions: >
+                  {{
+                    (states[light_mode_counter].state | int > 0) and 
+                    ( not( (motion_light_main_sw == none) or (states[motion_light_main_sw].state == 'on') ) or
+                    not( house_mode == none or required_house_mode == none or states[house_mode].state == required_house_mode ) )
+                  }}
+                sequence:
+                  - service: light.turn_off
+                    entity_id: !input target_entity
+                  - service: input_number.set_value
+                    data:
+                      entity_id: !input light_mode_counter
+                      value: 0
 
-  - service: light.turn_on
-    entity_id: !input target_entity
+    default:
+      # Check if motion is on
+      - condition: state
+        entity_id: !input motion_sensor
+        state: "on"
 
-  - delay:
-      seconds: 1
+      - condition: or
+        conditions:
+          - condition: template
+            value_template: "{{ states[light_mode_counter].state | int > 0 }}"
 
-  # Check if we reached the maximum number of executions
-  # If so reset the counter (this will keep light on
-  - choose:
-    - conditions: "{{ (number_of_repetitions|int > 0 ) and ( states[light_mode_counter].state|int > number_of_repetitions|int) }}"
-      sequence:
-        - service: input_number.set_value
-          data:
-            entity_id: !input light_mode_counter
-            value: 5
+          - condition: and
+            conditions:
+              # This conditions matter if the light is not in automatic mode
 
-  # Stop if counter was reset (means we reached the maximum number of executions)
-  - condition: template
-    value_template: "{{ (states[light_mode_counter].state|int) > 0 }}"
+              # Do not run if this blocker is ON
+              - condition: template
+                value_template: "{{ (blocker_on_entity == none) or (not states[blocker_on_entity].state == 'on') }}"
 
-  # Wait untill the motion sensor is off
-  - wait_template: "{{ not states[motion_sensor].state == 'on' }}"
+              # Do not run if the blocker is OFF
+              - condition: template
+                value_template: "{{ (blocker_off_entity == none) or (not states[blocker_off_entity].state == 'off') }}"
 
-  # Cancel if target is already off
-  # Otherwise wait for timeout
-  - wait_template: "{{ not states[target_entity].state == 'on' }}"
-    timeout:
-      seconds: "{{ ( (no_motion_wait|int) * (states[light_mode_counter].state|int) ) | int }}"
+              # Check illuminance level
+              - condition: template
+                value_template: >
+                  {{
+                    (illuminance_currently == none)
+                    or
+                    (illuminance_cutoff == none)
+                    or
+                    (states[illuminance_currently].state | int < illuminance_cutoff | int )
+                  }}
 
-  # Wait completed means that light was turned off manually
-  # If so reset counter
-  - choose:
-      - conditions: "{{ wait.completed }}"
-        sequence:
-          - service: input_number.set_value
-            data:
-              entity_id: !input light_mode_counter
-              value: 0
+              # Do not run if light is on (manually turn on)
+              - condition: state
+                entity_id: !input target_entity
+                state: "off"
 
-  # Only continue if target light is still on
-  - condition: state
-    entity_id: !input target_entity
-    state: "on"
+      - choose:
+          - conditions: "{{ states[target_entity].state == 'off' }}"
+            sequence:
+              - service: input_number.increment
+                data:
+                  entity_id: !input light_mode_counter
 
-  - service: light.turn_off
-    entity_id: !input target_entity
+      - service: light.turn_on
+        entity_id: !input target_entity
 
-  - delay:
-      seconds: 1
+      - delay:
+          seconds: 1
 
-  - wait_template: "{{ states[target_entity].state == 'on' }}"
-    timeout:
-      seconds: "{{ no_motion_wait }}"
+      # Check if we reached the maximum number of executions
+      # If so reset the counter (this will keep light on)
+      - choose:
+          - conditions: "{{ (number_of_repetitions|int > 0 ) and ( states[light_mode_counter].state|int > number_of_repetitions|int) }}"
+            sequence:
+              - service: input_number.set_value
+                data:
+                  entity_id: !input light_mode_counter
+                  value: 0
 
-  - service: input_number.set_value
-    data:
-      entity_id: !input light_mode_counter
-      value: 0
+      # Stop if counter was reset (means we reached the maximum number of executions)
+      - condition: template
+        value_template: "{{ (states[light_mode_counter].state|int) > 0 }}"
+
+      # Wait untill the motion sensor is off or untill light is manually turned off
+      - wait_template: >
+          {{ 
+              states[motion_sensor].state == 'off' 
+              or 
+              states[target_entity].state == 'off'
+          }}
+
+      # Wait a defined time or cancel if target is already off
+      - wait_template: "{{ states[target_entity].state == 'off' }}"
+        timeout:
+          seconds: "{{ ( (no_motion_wait|int) * (states[light_mode_counter].state|int) ) | int }}"
+
+      - wait_template: >
+          {% set is_device_in_room = namespace(value=0) %}
+          {% for device in states.device_tracker %}
+            {% if device.state == room_name %}
+              {% set is_device_in_room.value = is_device_in_room.value + 1 %}
+            {% endif %}
+          {% endfor %}
+          {% if states[target_entity].state == 'off' or is_device_in_room.value == 0 %}
+            True
+          {% else %}
+            False
+          {% endif %}
+        timeout:
+          seconds: "{{ ( (no_motion_wait|int) * (states[light_mode_counter].state|int) ) * 10 | int }}"
+
+      # Wait completed means that light was turned off manually
+      # Also check if light was alredy off
+      # If so reset counter
+      - choose:
+          - conditions: >
+              {{ 
+                  wait.completed 
+                  or 
+                  states[target_entity].state == 'off'
+              }}
+            sequence:
+              - service: input_number.set_value
+                data:
+                  entity_id: !input light_mode_counter
+                  value: 0
+
+      # Terminate if light is off at this point
+      - condition: state
+        entity_id: !input target_entity
+        state: "on"
+
+      - service: light.turn_off
+        entity_id: !input target_entity
+
+      - delay:
+          seconds: 1
+
+      - wait_template: "{{ states[target_entity].state == 'on' }}"
+        timeout:
+          seconds: "{{ no_motion_wait }}"
+
+      - service: input_number.set_value
+        data:
+          entity_id: !input light_mode_counter
+          value: 0
