@@ -1,5 +1,5 @@
 blueprint:
-  name: Configurar Luz com base no Estado da Casa
+  name: Configurar Luz com Base no Estado da Casa
   description: >
     Configurar temperatura e brilho das luzes com base na hora/modo de funcionamento da casa
 
@@ -26,7 +26,7 @@ blueprint:
           domain: scene
 
     scene_fallback:
-      name: Cenário em caso de duplo trigger
+      name: (OPCIONAL) Cenário em caso de duplo trigger
       default:
       selector:
         entity:
@@ -34,6 +34,8 @@ blueprint:
 
 mode: restart
 max_exceeded: silent
+variables:
+  scene_fallback: !input scene_fallback
 
 trigger:
   - platform: state
@@ -44,7 +46,7 @@ trigger:
 action:
   - alias: "Verificar se a luz acabou de ser acesa"
     choose:
-      - conditions: "{{ this.attributes.current == 1 }}"
+      - conditions: "{{ scene_fallback != none and this.attributes.current == 1 }}"
         sequence:
           - scene: !input scene_day
     default:
