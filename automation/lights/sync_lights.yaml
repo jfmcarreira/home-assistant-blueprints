@@ -20,24 +20,24 @@ blueprint:
       description: Light to follow state
       default:
       selector:
-        entity:
-          domain: light
+        target:
+          entity:
+            domain: light
     sync_exclusive:
       name: Turn light off when master ON
-      default: 'off'
+      default: "off"
       selector:
         boolean:
     sync_on:
       name: Sync ON state
-      default: 'off'
+      default: "off"
       selector:
         boolean:
     sync_off:
       name: Sync OFF state
-      default: 'off'
+      default: "off"
       selector:
         boolean:
-
 
 mode: restart
 max_exceeded: silent
@@ -48,17 +48,15 @@ variables:
   sync_off: !input sync_off
   sync_exclusive: !input sync_exclusive
 
-
 trigger:
   - platform: state
     entity_id: !input master_light
-    from: 'off'
-    to: 'on'
+    from: "off"
+    to: "on"
   - platform: state
     entity_id: !input master_light
-    from: 'on'
-    to: 'off'
-
+    from: "on"
+    to: "off"
 
 action:
   - choose:
@@ -69,7 +67,7 @@ action:
             value_template: "{{ sync_exclusive == True }}"
         sequence:
           - service: homeassistant.turn_off
-            entity_id: !input slave_light
+            target: !input slave_light
     default:
       - choose:
           - conditions:
@@ -79,7 +77,7 @@ action:
                 value_template: "{{ sync_on == True }}"
             sequence:
               - service: homeassistant.turn_on
-                entity_id: !input slave_light
+                target: !input slave_light
           - conditions:
               - condition: template
                 value_template: "{{ states[master_light].state == 'off' }}"
@@ -87,4 +85,4 @@ action:
                 value_template: "{{ sync_off == True }}"
             sequence:
               - service: homeassistant.turn_off
-                entity_id: !input slave_light
+                target: !input slave_light
