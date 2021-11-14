@@ -1,5 +1,5 @@
 blueprint:
-  name: Contolador do estado da iluminação (v2)
+  name: Contolador do estado da iluminação (v3)
   description: >
     Ligar luz com base no movimento e luminusidade da divisão.
 
@@ -101,13 +101,15 @@ blueprint:
       description: Nome do modo de funcionamento para esta automação
       default:
       selector:
-        text:
-    house_mode:
-      name: (OPCIONAL) Modo de funcionamento
-      description: Entidade que define o modo de funcionamento da casa
-      default:
-      selector:
-        entity:
+        select:
+          options:
+            - Todos
+            - Ligada
+            - Amanhecer/Anoitecer
+            - Noite
+            - Dormir
+            - Desligada
+            - Anoitecer+Noite
     motion_light_main_sw:
       name: (OPCIONAL) Controlador Geral das Luzes
       description: Entidade que funciona como interruptor geral das automações das luzes
@@ -126,11 +128,16 @@ max_exceeded: silent
 
 trigger:
   - platform: state
+    entity_id: binary_sensor.notify_home
+    to: "on"
+    id: notify_home_trigger
+
+  - platform: state
     entity_id: !input motion_sensor
     to: "on"
     id: motion_sensor_trigger
   - platform: state
-    entity_id: !input house_mode
+    entity_id: input_select.house_mode
     id: house_mode_trigger
   - platform: state
     entity_id: !input motion_light_main_sw
@@ -146,14 +153,24 @@ variables:
   blocker_on_entity: !input blocker_on_entity
   blocker_off_entity: !input blocker_off_entity
   no_motion_wait: !input no_motion_wait
-  required_house_mode: !input required_house_mode
-  house_mode: !input house_mode
   motion_light_main_sw: !input motion_light_main_sw
   only_after_sunset: !input only_after_sunset
   room_name: !input room_name
+  ## Automation states
   min_repetition_interval_sec: !input min_repetition_interval_sec
   automation_last_triggered: "{{ this.attributes.last_triggered }}"
   automation_previous_state: "{{ this.attributes.current }}"
+  ## House Mode
+  #house_mode: "{{ states.input_select.house_mode.state }}"
+  house_mode: "{{ states.sensor.house_mode.state }}"
+  required_house_mode: !input required_house_mode
+  house_mode_requirement: >
+    {{
+      required_house_mode == "Todos" or
+      required_house_mode == house_mode or
+      ( required_house_mode == "Anoitecer+Noite" and ( house_mode == "Amanhecer/Anoitecer" or house_mode == "Noite" ) )
+    }}
+
 
 condition:
   - condition: or
@@ -165,6 +182,12 @@ condition:
       # This conditions matter if the light is not in automatic mode
       - condition: and
         conditions:
+
+          # Do not run if house is empty
+          - condition: state
+            entity_id: binary_sensor.notify_home
+            state: "on"
+
           # Do not run if light is on (manually turn on)
           - condition: state
             entity_id: !input target_entity
@@ -177,7 +200,7 @@ condition:
           - "{{ (only_after_sunset == false) or  (state_attr('sun.sun', 'elevation') < 10) }}"
 
           # Only run in specific house mode
-          - "{{ house_mode == none or required_house_mode == none or states[house_mode].state == required_house_mode }}"
+          - "{{ house_mode_requirement }}"
 
           # Do not run if this blocker is ON
           - "{{ (blocker_on_entity == none) or (not states[blocker_on_entity].state == 'on') }}"
@@ -210,15 +233,16 @@ action:
   # Check if house mode, automation or sunset is met
   #- alias: "Process specific triggers that can change light state"
   - choose:
-      - conditions: "{{ trigger.id == 'house_mode_trigger' or trigger.id == 'motion_light_sw_state_trigger' }}"
+      - conditions: "{{ trigger.id == 'house_mode_trigger' or trigger.id == 'motion_light_sw_state_trigger' or trigger.id == 'notify_home_trigger' }}"
         sequence:
           - choose:
               conditions:
                 - "{{ this.attributes.current == 1 }}"
                 - condition: or
                   conditions:
+                    - "{{ house_mode == 'Off' }}"
                     - "{{ not( (motion_light_main_sw == none) or (states[motion_light_main_sw].state == 'on') ) }}"
-                    - "{{ not( house_mode == none or required_house_mode == none or states[house_mode].state == required_house_mode ) }}"
+                    - "{{ not( house_mode_requirement ) }}"
               sequence:
                 - service: light.turn_off
                   entity_id: !input target_entity
