@@ -30,6 +30,8 @@ blueprint:
       - Nível de luminusidade
       - Bloqueio se desligado (apenas executa a automação se entidade não estiver OFF)
       - Bloqueio se ligado (apenas executa a automação se entidade não estiver ON)
+      - Nome da Divisão
+      - Sensor de Ocupação da divisão
 
   domain: automation
   input:
@@ -63,7 +65,7 @@ blueprint:
           max: 120
           unit_of_measurement: "s"
     illuminance_sensor:
-      name: (OPCIONAL) Sensor de luminusidade
+      name: Sensor de luminusidade
       description: Sensor com o valor de luminusidade na divisão.
       default:
       selector:
@@ -71,7 +73,7 @@ blueprint:
           domain: sensor
           device_class: illuminance
     illuminance_cutoff:
-      name: (OPCIONAL) Luminusidade
+      name: Luminusidade
       description: Executar a automação se a luminusidade for abaixo deste valor.
       default:
       selector:
@@ -79,25 +81,31 @@ blueprint:
           min: 0
           max: 100
     only_after_sunset:
-      name: (OPCIONAL) Funcionamento Exclusivo de Noite
+      name: Funcionamento Exclusivo de Noite
       description: Apenas executar a automação durante a noite (após o pôr do sol)
       default: "off"
       selector:
         boolean:
+    disable_in_guest:
+      name: Desabilitar no Modo de Convidados
+      description: Não executar a automação se o modo de convidados estiver ON
+      default: "off"
+      selector:
+        boolean:
     blocker_on_entity:
-      name: (OPCIONAL) Entidade bloqueadora ON
+      name: Entidade bloqueadora ON
       description: Automção é excluída se esta entidade estiver ON (ex, outras luzes já estarem ligadas).
       default:
       selector:
         entity:
     blocker_off_entity:
-      name: (OPCIONAL) Entidade bloqueadora OFF
+      name: Entidade bloqueadora OFF
       description: Automção é excluída se esta entidade estiver OFF (ex, se não estiver ninguém em casa).
       default:
       selector:
         entity:
     required_house_mode:
-      name: (OPCIONAL) Ativar no modo de funcionamento
+      name: Ativar no modo de funcionamento
       description: Nome do modo de funcionamento para esta automação
       default:
       selector:
@@ -109,16 +117,18 @@ blueprint:
             - Noite
             - Dormir
             - Desligada
+            - Dia+Anoitecer
             - Anoitecer+Noite
-    motion_light_main_sw:
-      name: (OPCIONAL) Controlador Geral das Luzes
-      description: Entidade que funciona como interruptor geral das automações das luzes
-      default:
+    presence_sensor:
+      name: Sensor de ocupação da divisão
+      description: Sensor que sinaliza a ocupação da divisão (mantém a luz ligada)
+      default: none
       selector:
         entity:
-          domain: input_boolean
+          domain: binary_sensor
+          device_class: occupancy
     room_name:
-      name: (OPCIONAL) Nome da Divisão
+      name: Nome da Divisão
       description: >
         Nome da divisão onde é aplicada esta regra de forma a cruzar os dados com device_tracker.
         Se estiver alguém presente nesta divisão a luz não é apagada.
@@ -140,7 +150,7 @@ trigger:
     entity_id: input_select.house_mode
     id: house_mode_trigger
   - platform: state
-    entity_id: !input motion_light_main_sw
+    entity_id: input_boolean.automation_sw_all_motion_lights
     from: "on"
     to: "off"
     id: motion_light_sw_state_trigger
@@ -153,65 +163,92 @@ variables:
   blocker_on_entity: !input blocker_on_entity
   blocker_off_entity: !input blocker_off_entity
   no_motion_wait: !input no_motion_wait
-  motion_light_main_sw: !input motion_light_main_sw
   only_after_sunset: !input only_after_sunset
+  presence_sensor: !input presence_sensor
   room_name: !input room_name
   ## Automation states
   min_repetition_interval_sec: !input min_repetition_interval_sec
   automation_last_triggered: "{{ this.attributes.last_triggered }}"
   automation_previous_state: "{{ this.attributes.current }}"
   ## House Mode
-  #house_mode: "{{ states.input_select.house_mode.state }}"
+  disable_in_guest: !input disable_in_guest
   house_mode: "{{ states.sensor.house_mode.state }}"
   required_house_mode: !input required_house_mode
   house_mode_requirement: >
     {{
       required_house_mode == "Todos" or
       required_house_mode == house_mode or
-      ( required_house_mode == "Anoitecer+Noite" and ( house_mode == "Amanhecer/Anoitecer" or house_mode == "Noite" ) )
+      ( required_house_mode == "Anoitecer+Noite" and ( states.sensor.house_mode.state == "Amanhecer/Anoitecer" or states.sensor.house_mode.state == "Noite" ) ) or 
+      ( required_house_mode == "Dia+Anoitecer" and ( states.sensor.house_mode.state == "Amanhecer/Anoitecer" or states.sensor.house_mode.state == "Ligada" ) )
     }}
 
-
 condition:
+  # Do not run if house is empty
+  - condition: state
+    entity_id: binary_sensor.notify_home
+    state: "on"
+
+  # Do not run if automation controller is off
+  - condition: state
+    entity_id: input_boolean.automation_sw_all_motion_lights
+    state: "on"
+
+  # Do not run in guest mode if set
+  - condition: or
+    conditions:
+      - "{{ disable_in_guest == false }}"
+      - condition: state
+        entity_id: input_boolean.house_guest
+        state: "off"
+
+  # Only run in specific house mode
+  - condition: or
+    conditions:
+      - "{{ automation_previous_state == 1 }}"
+      - "{{ house_mode_requirement }}"
+
+  # Do not run if this blocker is ON
+  - condition: or
+    conditions:
+      - "{{ automation_previous_state == 1 }}"
+      - "{{ (blocker_on_entity == none) or (not states[blocker_on_entity].state == 'on') }}"
+
+  # Do not run if the blocker is OFF
+  - condition: or
+    conditions:
+      - "{{ automation_previous_state == 1 }}"
+      - "{{ (blocker_off_entity == none) or (not states[blocker_off_entity].state == 'off') }}"
+
   - condition: or
     conditions:
       # Run if the light is in automatic mode (automation is already running)
-      - "{{ this.attributes.current == 1 }}"
+      - "{{ automation_previous_state == 1 }}"
 
       # These are the conditions to enter in automatic mode
       # This conditions matter if the light is not in automatic mode
       - condition: and
         conditions:
-
-          # Do not run if house is empty
-          - condition: state
-            entity_id: binary_sensor.notify_home
-            state: "on"
-
           # Do not run if light is on (manually turn on)
           - condition: state
             entity_id: !input target_entity
             state: "off"
 
-          # Do not run if automation controller is off
-          - "{{ (motion_light_main_sw == none) or (states[motion_light_main_sw].state == 'on') }}"
-
           # Do not run if sun is not down
-          - "{{ (only_after_sunset == false) or  (state_attr('sun.sun', 'elevation') < 10) }}"
-
-          # Only run in specific house mode
-          - "{{ house_mode_requirement }}"
-
-          # Do not run if this blocker is ON
-          - "{{ (blocker_on_entity == none) or (not states[blocker_on_entity].state == 'on') }}"
-
-          # Do not run if the blocker is OFF
-          - "{{ (blocker_off_entity == none) or (not states[blocker_off_entity].state == 'off') }}"
+          - condition: or
+            conditions:
+              - "{{ only_after_sunset == false }}"
+              - condition: numeric_state
+                entity_id: sun.sun
+                attribute: elevation
+                below: 10
 
           # Check illuminance level
           # This is only valid if the light is off for more than 10 sec (refresh time of the lux sensor)
           - condition: or
             conditions:
+              - "{{ illuminance_currently == none }}"
+              - "{{ illuminance_cutoff == none }}"
+              - "{{ states[illuminance_currently].state | int < illuminance_cutoff | int  }}"
               - condition: not
                 conditions:
                   - condition: state
@@ -219,20 +256,11 @@ condition:
                     state: "off"
                     for:
                       seconds: 10
-              - condition: template
-                value_template: >
-                  {{
-                    (illuminance_currently == none)
-                    or
-                    (illuminance_cutoff == none)
-                    or
-                    (states[illuminance_currently].state | int < illuminance_cutoff | int )
-                  }}
 
 action:
   # Check if house mode, automation or sunset is met
-  #- alias: "Process specific triggers that can change light state"
-  - choose:
+  - alias: "Process specific triggers that can change light state"
+    choose:
       - conditions: "{{ trigger.id == 'house_mode_trigger' or trigger.id == 'motion_light_sw_state_trigger' or trigger.id == 'notify_home_trigger' }}"
         sequence:
           - choose:
@@ -241,7 +269,7 @@ action:
                 - condition: or
                   conditions:
                     - "{{ house_mode == 'Off' }}"
-                    - "{{ not( (motion_light_main_sw == none) or (states[motion_light_main_sw].state == 'on') ) }}"
+                    - "{{ states.input_boolean.automation_sw_all_motion_lights.state == 'off' }}"
                     - "{{ not( house_mode_requirement ) }}"
               sequence:
                 - service: light.turn_off
@@ -250,8 +278,8 @@ action:
                 - condition: template
                   value_template: "{{ false }}"
 
-  #- alias: "If we repeat this action was ran twice in a short period of time"
-  - choose:
+  - alias: "If we repeat this action twice in a short period of time keep light on"
+    choose:
       - conditions:
           - "{{ automation_previous_state == 0 }}"
           - "{{ now().timestamp() - automation_last_triggered - no_motion_wait | as_timestamp < min_repetition_interval_sec }}"
@@ -260,27 +288,31 @@ action:
           - condition: template
             value_template: "{{ false }}"
 
-  # Double check if motion is on
-  - condition: state
+  - alias: "Check if motion is ON"
+    condition: state
     entity_id: !input motion_sensor
     state: "on"
 
-  - service: light.turn_on
+  - alias: "Turning light ON"
+    service: light.turn_on
     entity_id: !input target_entity
 
   - delay:
       seconds: 1
 
-  # Wait untill the motion sensor is off or untill light is manually turned off
-  - wait_template: >
+  - alias: "Wait untill the room is empty"
+    wait_template: >
       {{
-          states[motion_sensor].state == 'off'
-          or
+          presence_sensor == 'none' or 
+          states[presence_sensor].state == 'off' or
           states[target_entity].state == 'off'
       }}
 
-  # Wait untill room has presence
-  - wait_template: >
+  - alias: "Wait untill the motion sensor is off and the room is empty"
+    wait_template: "{{ states[motion_sensor].state == 'off' or states[target_entity].state == 'off' }}"
+
+  - alias: "Wait while room has presence"
+    wait_template: >
       {% if room_name %}
         {% set is_device_in_room = namespace(value=0) %}
         {% for device in states.device_tracker %}
@@ -297,15 +329,11 @@ action:
         True
       {% endif %}
 
-  # Wait a defined time or cancel if target is already off
-  - wait_template: "{{ states[target_entity].state == 'off' }}"
+  - alias: "Wait a defined time or cancel if target is already off"
+    wait_template: "{{ states[target_entity].state == 'off' }}"
     timeout:
       seconds: "{{ no_motion_wait | int }}"
 
-  # Terminate if light is off at this point
-  - condition: state
-    entity_id: !input target_entity
-    state: "on"
-
-  - service: light.turn_off
+  - alias: "Turn light OFF"
+    service: light.turn_off
     entity_id: !input target_entity
