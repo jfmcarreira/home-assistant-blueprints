@@ -1,5 +1,5 @@
 blueprint:
-  name: Contolador do estado da iluminação (v2)
+  name: "[Lights] Contolador do estado da iluminação (v2)"
   description: >
     Ligar luz com base no movimento e luminusidade da divisão.
 

@@ -1,5 +1,5 @@
 blueprint:
-  name: Contolador do estado da iluminação
+  name: "[Lights] Contolador do estado da iluminação (v1)"
   description: >
     Ligar luz com base no movimento e luminusidade da divisão.
 
@@ -215,7 +215,6 @@ condition:
                     or
                     (states[illuminance_currently].state | int < illuminance_cutoff | int )
                   }}
-
 
 action:
   # Check if house mode, automation or sunset is met

@@ -1,5 +1,5 @@
 blueprint:
-  name: Contolador do estado da iluminação (v3)
+  name: "[Lights] Contolador do estado da iluminação (v3)"
   description: >
     Ligar luz com base no movimento e luminusidade da divisão.
 
@@ -219,43 +219,42 @@ condition:
       - "{{ automation_previous_state == 1 }}"
       - "{{ (blocker_off_entity == none) or (not states[blocker_off_entity].state == 'off') }}"
 
+  # These are the conditions to enter in automatic mode
+  # This conditions matter if the light is not in automatic mode
+
   - condition: or
     conditions:
       # Run if the light is in automatic mode (automation is already running)
       - "{{ automation_previous_state == 1 }}"
+      # Do not run if light is on (manually turn on)
+      - condition: state
+        entity_id: !input target_entity
+        state: "off"
 
-      # These are the conditions to enter in automatic mode
-      # This conditions matter if the light is not in automatic mode
-      - condition: and
+  - condition: or
+    conditions:
+      # Run if the light is in automatic mode (automation is already running)
+      - "{{ automation_previous_state == 1 }}"
+      - "{{ only_after_sunset == false }}"
+      - condition: numeric_state
+        entity_id: sun.sun
+        attribute: elevation
+        below: 10
+
+  - condition: or
+    conditions:
+      # Run if the light is in automatic mode (automation is already running)
+      - "{{ automation_previous_state == 1 }}"
+      - "{{ illuminance_currently == none }}"
+      - "{{ illuminance_cutoff == none }}"
+      - "{{ states[illuminance_currently].state | int < illuminance_cutoff | int  }}"
+      - condition: not
         conditions:
-          # Do not run if light is on (manually turn on)
           - condition: state
             entity_id: !input target_entity
             state: "off"
-
-          # Do not run if sun is not down
-          - condition: or
-            conditions:
-              - "{{ only_after_sunset == false }}"
-              - condition: numeric_state
-                entity_id: sun.sun
-                attribute: elevation
-                below: 10
-
-          # Check illuminance level
-          # This is only valid if the light is off for more than 10 sec (refresh time of the lux sensor)
-          - condition: or
-            conditions:
-              - "{{ illuminance_currently == none }}"
-              - "{{ illuminance_cutoff == none }}"
-              - "{{ states[illuminance_currently].state | int < illuminance_cutoff | int  }}"
-              - condition: not
-                conditions:
-                  - condition: state
-                    entity_id: !input target_entity
-                    state: "off"
-                    for:
-                      seconds: 10
+            for:
+              seconds: 10
 
 action:
   # Check if house mode, automation or sunset is met

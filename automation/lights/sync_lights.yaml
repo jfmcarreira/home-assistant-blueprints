@@ -51,12 +51,12 @@ variables:
 trigger:
   - platform: state
     entity_id: !input master_light
-    from: "off"
-    to: "on"
-  - platform: state
-    entity_id: !input master_light
-    from: "on"
-    to: "off"
+  #   from: "off"
+  #   to: "on"
+  # - platform: state
+  #   entity_id: !input master_light
+  #   from: "on"
+  #   to: "off"
 
 action:
   - choose:
