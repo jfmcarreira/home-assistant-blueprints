@@ -83,11 +83,11 @@ action:
               task_action: !input notification_action_id
               task_action_message: !input notification_action
               task_id: !input android_task_id
-          - service: persistent_notification.create
-            data:
-              title: Tarefa Doméstica
-              message: !input notification_message
-              notification_id: !input notification_action_id
+          # - service: persistent_notification.create
+          #   data:
+          #     title: Tarefa Doméstica
+          #     message: !input notification_message
+          #     notification_id: !input notification_action_id
 
     default:
       #- conditions: "{{ trigger.id == 'trigger_restart_machine' or trigger.id == 'trigger_notification_action' or trigger.id == 'trigger_notification_action' }}"
