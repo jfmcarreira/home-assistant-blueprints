@@ -92,6 +92,12 @@ blueprint:
       default: "off"
       selector:
         boolean:
+    disable_in_sleep:
+      name: Desabilitar no Modo de Dormir
+      description: Não executar a automação se o modo de dormir estiver ativo
+      default: "off"
+      selector:
+        boolean:
     blocker_on_entity:
       name: Entidade bloqueadora ON
       description: Automção é excluída se esta entidade estiver ON (ex, outras luzes já estarem ligadas).
@@ -172,6 +178,7 @@ variables:
   automation_previous_state: "{{ this.attributes.current }}"
   ## House Mode
   disable_in_guest: !input disable_in_guest
+  disable_in_sleep: !input disable_in_sleep
   house_mode: "{{ states.sensor.house_mode.state }}"
   required_house_mode: !input required_house_mode
   house_mode_requirement: >
@@ -200,6 +207,13 @@ condition:
       - condition: state
         entity_id: input_boolean.house_guest
         state: "off"
+
+  - condition: not
+    conditions:
+      - "{{ disable_in_sleep == false }}"
+      - condition: state
+        entity_id: input_select.house_mode
+        state: "Sleep"
 
   # Only run in specific house mode
   - condition: or
