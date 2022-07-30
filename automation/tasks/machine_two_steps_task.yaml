@@ -74,10 +74,10 @@ variables:
   task_machine_code_name: !input task_machine_code_name
   task_done_code_name: !input task_done_code_name
   record_timestamp: "{{ now().timestamp() | timestamp_custom('%Y-%m-%d %H:%M:%S') }}"
-  energy_dryer_machine: !input machine_energy_sensor
+  machine_energy: !input machine_energy_sensor
   task_needs_attention: !input task_needs_attention
   energy_usage: >
-    {{ states(energy_dryer_machine) | float - state_attr(task_needs_attention, 'Energia') | float }}
+    {{ states(machine_energy) | float - state_attr(task_needs_attention, 'energia_total') | float(0) }}
   tts_message_timming: "00:00:10"
 
 trigger:
