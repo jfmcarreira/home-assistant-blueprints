@@ -40,6 +40,7 @@ blueprint:
       description: Sensor que aciona a automação
       selector:
         entity:
+          domain: binary_sensor
     target_entity:
       name: Luz a controlar
       description: Luz a controlar pela automação
@@ -101,13 +102,13 @@ blueprint:
     blocker_on_entity:
       name: Entidade bloqueadora ON
       description: Automção é excluída se esta entidade estiver ON (ex, outras luzes já estarem ligadas).
-      default:
+      default: none
       selector:
         entity:
     blocker_off_entity:
       name: Entidade bloqueadora OFF
       description: Automção é excluída se esta entidade estiver OFF (ex, se não estiver ninguém em casa).
-      default:
+      default: binary_sensor.notify_home
       selector:
         entity:
     required_house_mode:
@@ -225,13 +226,13 @@ condition:
   - condition: or
     conditions:
       - "{{ automation_previous_state == 1 }}"
-      - "{{ (blocker_on_entity == none) or (not states[blocker_on_entity].state == 'on') }}"
+      - "{{ (blocker_on_entity == 'none') or (not states[blocker_on_entity].state == 'on') }}"
 
   # Do not run if the blocker is OFF
   - condition: or
     conditions:
       - "{{ automation_previous_state == 1 }}"
-      - "{{ (blocker_off_entity == none) or (not states[blocker_off_entity].state == 'off') }}"
+      - "{{ (blocker_off_entity == 'none') or (not states[blocker_off_entity].state == 'off') }}"
 
   # These are the conditions to enter in automatic mode
   # This conditions matter if the light is not in automatic mode
@@ -259,9 +260,11 @@ condition:
     conditions:
       # Run if the light is in automatic mode (automation is already running)
       - "{{ automation_previous_state == 1 }}"
-      - "{{ illuminance_currently == none }}"
-      - "{{ illuminance_cutoff == none }}"
-      - "{{ states[illuminance_currently].state | int < illuminance_cutoff | int  }}"
+      - "{{ illuminance_currently == 'none' }}"
+      - "{{ illuminance_cutoff == '0' }}"
+      - condition: numeric_state
+        entity_id: !input illuminance_sensor
+        below: !input illuminance_cutoff
       - condition: not
         conditions:
           - condition: state
