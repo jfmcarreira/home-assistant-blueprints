@@ -133,11 +133,21 @@ action:
                 "{{ record_timestamp }}"
               save_date_time: "true"
 
+          - service: shell_command.external_my_sql_insert
+            data:
+              table: tasks
+              value: "{{ states(machine_energy) | float(0) }}"
+              column: total_energy
+              date_stamp: >
+                "{{ record_timestamp }}"
+              save_date_time: "true"
+
           - service: notify.living_room_tv
             data:
               title: Tarefa Doméstica
               message: !input machine_finish_message
 
+  - choose:
       - conditions: "{{ trigger.id == 'trigger_machine_finished' or trigger.id == 'trigger_send_notification' }}"
         sequence:
           - condition: state
